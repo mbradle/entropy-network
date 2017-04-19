@@ -66,8 +66,8 @@ get_user_defined_descriptions( po::options_description& user )
         "Expansion timescale (s)"
       )
 
-      ( S_YA, po::value<double>()->default_value( 5, "5" ),
-        "Scaled asymptotic velocity"
+      ( S_TA, po::value<double>()->default_value( 1, "1" ),
+        "Asymptotic timescale (in units of tau)"
       )
 
       ( S_ROOT_FACTOR, po::value<double>()->default_value( 1.001, "1.001" ),
@@ -99,10 +99,16 @@ void
 set_user_defined_options( po::variables_map& vmap, param_map_t& param_map )
 {
 
+  if( vmap[S_TA].as<double>() < 0 || vmap[nnt::s_TAU].as<double>() < 0 )
+  {
+    std::cerr << "Timescale must be larger than 0." << std::endl;
+    exit( EXIT_FAILURE );
+  }
+
   param_map[nnt::s_T9_0] = vmap[nnt::s_T9_0].as<double>();
   param_map[nnt::s_RHO_0] = vmap[nnt::s_RHO_0].as<double>();
   param_map[nnt::s_TAU] = vmap[nnt::s_TAU].as<double>();
-  param_map[S_YA] = vmap[S_YA].as<double>();
+  param_map[S_TA] = vmap[S_TA].as<double>() * vmap[nnt::s_TAU].as<double>();
   param_map[S_ROOT_FACTOR] = vmap[S_ROOT_FACTOR].as<double>();
  
 }
@@ -120,12 +126,10 @@ initialize_state(
 
   x[0] = 1.;
   x[1] =
-    boost::any_cast<double>( param_map[S_YA] ) /
+    boost::any_cast<double>( param_map[S_TA] ) /
     (
-      1.
-      +
-      boost::any_cast<double>( param_map[S_YA] ) 
-      *
+      boost::any_cast<double>( param_map[S_TA] ) 
+      + 
       boost::any_cast<double>( param_map[nnt::s_TAU] )
     );
 
@@ -145,9 +149,9 @@ acceleration(
 {
 
   double tau = boost::any_cast<double>( param_map[nnt::s_TAU] );
-  double y =  boost::any_cast<double>( param_map[S_YA] );
+  double t_a =  boost::any_cast<double>( param_map[S_TA] );
 
-  return gsl_pow_2( y ) / ( y * tau + exp( time / tau ) );
+  return gsl_pow_2( 1. / t_a ) / ( ( tau / t_a ) + exp( time / tau ) );
 
 }
 

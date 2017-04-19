@@ -27,6 +27,7 @@
 #include <iostream>
 #include <algorithm>
 
+#include <boost/algorithm/string/find.hpp>
 #include <boost/bind.hpp>
 #include <boost/program_options.hpp>
 #include <boost/tokenizer.hpp>
@@ -444,16 +445,6 @@ get_input( int argc, char **argv )
       exit( EXIT_SUCCESS );
     }
 
-    if( argc == 1 || vm.count("help") == 1 )
-    {
-      std::cerr <<
-        "\nUsage: " << argv[0] << " net_xml zone_xml output_xml [options]" <<
-        std::endl;
-      std::cerr << s_purpose << std::endl;
-      std::cout << help << "\n";
-      exit( EXIT_FAILURE );
-    }
-
     if( vm.count( S_PROGRAM_OPTIONS ) )
     {
       program_options(
@@ -464,6 +455,26 @@ get_input( int argc, char **argv )
         user,
         all
       );
+    }
+
+    if( argc < 4 || vm.count("help") == 1 )
+    {
+      std::cerr <<
+        "\nUsage: " << argv[0] << " net_xml zone_xml output_xml [options]" <<
+        std::endl;
+      std::cerr << s_purpose << std::endl;
+      std::cout << help << "\n";
+      exit( EXIT_FAILURE );
+    }
+
+    if(
+      boost::algorithm::ifind_first( argv[1], "--" ) || 
+      boost::algorithm::ifind_first( argv[2], "--" ) ||
+      boost::algorithm::ifind_first( argv[3], "--" )
+    )
+    {
+      std::cerr << "Required arguments must not be options." << std::endl;
+      exit( EXIT_FAILURE );
     }
 
     if( vm.count( S_RESPONSE_FILE ) )
@@ -530,6 +541,24 @@ get_input( int argc, char **argv )
     }
 
     //==========================================================================
+    // Get non-network data.
+    //==========================================================================
+
+    param_map[nnt::s_TIME] = vm[nnt::s_TIME].as<double>();
+    param_map[nnt::s_DTIME] = vm[nnt::s_DTIME].as<double>();
+    param_map[nnt::s_TEND] = vm[nnt::s_TEND].as<double>();
+    param_map[nnt::s_STEPS] = vm[nnt::s_STEPS].as<size_t>();
+    param_map[nnt::s_USE_SCREENING] = vm[nnt::s_USE_SCREENING].as<std::string>();
+    param_map[nnt::s_USE_NSE_CORRECTION] =
+      vm[nnt::s_USE_NSE_CORRECTION].as<std::string>();
+    param_map[S_T9_GUESS] = vm[S_T9_GUESS].as<std::string>();
+    param_map[S_OBSERVE] = vm[S_OBSERVE].as<std::string>();
+    param_map[nnt::s_MU_NUE_KT] = vm[nnt::s_MU_NUE_KT].as<std::string>();
+
+    // Set user-defined options
+    my_user::set_user_defined_options( vm, param_map );
+
+    //==========================================================================
     // Get network and view.
     //==========================================================================
 
@@ -559,24 +588,6 @@ get_input( int argc, char **argv )
           s_sdot_reac_xpath.c_str()
         );
     }
-
-    //==========================================================================
-    // Get other data.
-    //==========================================================================
-
-    param_map[nnt::s_TIME] = vm[nnt::s_TIME].as<double>();
-    param_map[nnt::s_DTIME] = vm[nnt::s_DTIME].as<double>();
-    param_map[nnt::s_TEND] = vm[nnt::s_TEND].as<double>();
-    param_map[nnt::s_STEPS] = vm[nnt::s_STEPS].as<size_t>();
-    param_map[nnt::s_USE_SCREENING] = vm[nnt::s_USE_SCREENING].as<std::string>();
-    param_map[nnt::s_USE_NSE_CORRECTION] =
-      vm[nnt::s_USE_NSE_CORRECTION].as<std::string>();
-    param_map[S_T9_GUESS] = vm[S_T9_GUESS].as<std::string>();
-    param_map[S_OBSERVE] = vm[S_OBSERVE].as<std::string>();
-    param_map[nnt::s_MU_NUE_KT] = vm[nnt::s_MU_NUE_KT].as<std::string>();
-
-    // Set user-defined options
-    my_user::set_user_defined_options( vm, param_map );
 
     return param_map;
 
