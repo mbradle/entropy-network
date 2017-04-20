@@ -126,7 +126,7 @@ initialize_state(
 
   x[0] = 1.;
   x[1] =
-    boost::any_cast<double>( param_map[S_TA] ) /
+    1. /
     (
       boost::any_cast<double>( param_map[S_TA] ) 
       + 
@@ -151,7 +151,7 @@ acceleration(
   double tau = boost::any_cast<double>( param_map[nnt::s_TAU] );
   double t_a =  boost::any_cast<double>( param_map[S_TA] );
 
-  return gsl_pow_2( 1. / t_a ) / ( ( tau / t_a ) + exp( time / tau ) );
+  return x[1] / ( tau  + t_a * exp( time / tau ) );
 
 }
 
