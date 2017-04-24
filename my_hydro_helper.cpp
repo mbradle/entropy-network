@@ -54,14 +54,6 @@ get_user_defined_descriptions( po::options_description& user )
 
     user.add_options()
 
-      ( nnt::s_T9_0, po::value<double>()->default_value( 10., "10." ),
-        "Initial T (in 10^9 K)"
-      )
-
-      ( nnt::s_RHO_0, po::value<double>()->default_value( 1.e8, "1.e8" ),
-        "Initial density (g/cc)"
-      )
-
       ( nnt::s_TAU, po::value<double>()->default_value( 0.1, "0.1" ),
         "Expansion timescale (s)"
       )
@@ -105,8 +97,6 @@ set_user_defined_options( po::variables_map& vmap, param_map_t& param_map )
     exit( EXIT_FAILURE );
   }
 
-  param_map[nnt::s_T9_0] = vmap[nnt::s_T9_0].as<double>();
-  param_map[nnt::s_RHO_0] = vmap[nnt::s_RHO_0].as<double>();
   param_map[nnt::s_TAU] = vmap[nnt::s_TAU].as<double>();
   param_map[S_TA] = vmap[S_TA].as<double>() * vmap[nnt::s_TAU].as<double>();
   param_map[S_ROOT_FACTOR] = vmap[S_ROOT_FACTOR].as<double>();
