@@ -2,3 +2,5 @@ run_entropy
 *.xml
 *.txt
 *.dSYM
+*.py
+*.pyc

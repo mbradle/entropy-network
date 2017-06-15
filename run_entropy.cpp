@@ -27,6 +27,7 @@
 #include <iostream>
 #include <algorithm>
 
+#include <boost/algorithm/string/find.hpp>
 #include <boost/bind.hpp>
 #include <boost/program_options.hpp>
 #include <boost/tokenizer.hpp>
@@ -87,9 +88,11 @@ typedef my_user::state_type my_state_type;
 #define S_SOLVER       nnt::s_ARROW // Solver type: ARROW or GSL
 #define S_SDOT_NUC_XPATH  "sdot_nuc_xpath"
 #define S_SDOT_REAC_XPATH  "sdot_reac_xpath"
+#define S_S_0              "s_0"
 #define S_T9_FUNCTION   "t9 function"
 #define S_T9_GUESS   "t9_guess"
 #define S_VIEW         "view"
+#define S_ZONE_FILE    "zone_file"
 
 
 #define B_OUTPUT_EVERY_TIME_DUMP    false  // Change to true to write to xml
@@ -108,6 +111,8 @@ std::pair<std::string,std::string> at_option_parser( std::string const& s )
 {
   if ( '@' == s[0] )
     return std::make_pair( std::string( S_RESPONSE_FILE ), s.substr( 1 ) );
+  else if ( '#' == s[0] )
+    return std::make_pair( "", "" );
   else
     return std::pair<std::string,std::string>();
 }
@@ -310,6 +315,141 @@ program_options(
 }
 
 //##############################################################################
+// remove_isolated_species().
+//##############################################################################
+
+void
+remove_isolated_species( Libnucnet * p_nucnet )
+{
+
+  std::set<std::string> isolated_species_set;
+
+  if(
+    Libnucnet__Reac__getNumberOfReactions(
+      Libnucnet__Net__getReac( Libnucnet__getNet( p_nucnet ) )
+    ) != 0
+  )
+  {
+
+    isolated_species_set =
+      user::get_isolated_species(
+        Libnucnet__getNet( p_nucnet ),
+        "",
+        ""
+      );
+
+    BOOST_FOREACH( std::string s_species, isolated_species_set )
+    {
+
+      std::cout << s_species << std::endl;
+
+      Libnucnet__Nuc__removeSpecies(
+        Libnucnet__Net__getNuc( Libnucnet__getNet( p_nucnet ) ),
+        Libnucnet__Nuc__getSpeciesByName(
+          Libnucnet__Net__getNuc(
+            Libnucnet__getNet( p_nucnet )
+          ),
+          s_species.c_str()
+        )
+      );
+
+    }
+
+  }
+
+}
+  
+//##############################################################################
+// set_thermo_conditions_and_abundances().
+//##############################################################################
+
+void
+set_thermo_conditions_and_abundances(
+  po::variables_map& vm,
+  my_user::param_map_t& param_map
+)
+{
+
+  remove_isolated_species(
+    boost::any_cast<Libnucnet *>( param_map[S_NUCNET] )
+  );
+
+  if( vm.count(S_ZONE_FILE) == 1 )
+  {
+    param_map[nnt::s_T9_0] = vm[nnt::s_T9_0].as<double>();
+    param_map[nnt::s_RHO_0] = vm[nnt::s_RHO_0].as<double>();
+    Libnucnet__assignZoneDataFromXml(
+      boost::any_cast<Libnucnet *>( param_map[S_NUCNET] ),
+      (vm[S_ZONE_FILE].as<std::string>()).c_str(),
+      ""
+    );
+    return;
+  }
+
+  Libnucnet__Zone * p_zone =
+    Libnucnet__Zone__new( 
+      Libnucnet__getNet(
+        boost::any_cast<Libnucnet *>( param_map[S_NUCNET] )
+      ),
+      "0",
+      "0",
+      "0"
+    );
+
+  Libnucnet__addZone(
+    boost::any_cast<Libnucnet *>( param_map[S_NUCNET] ),
+    p_zone
+  );
+      
+  nnt::Zone zone;
+  zone.setNucnetZone( p_zone );
+
+  zone.updateProperty( nnt::s_YE, vm[nnt::s_YE].as<double>() );
+
+  if( vm.count( nnt::s_T9_0 ) == 1 && vm.count( nnt::s_RHO_0 ) == 1 )
+  {
+    param_map[nnt::s_T9_0] = vm[nnt::s_T9_0].as<double>();
+    param_map[nnt::s_RHO_0] = vm[nnt::s_RHO_0].as<double>();
+    zone.updateProperty( nnt::s_T9, vm[nnt::s_T9_0].as<double>() );
+    zone.updateProperty( nnt::s_RHO, vm[nnt::s_RHO_0].as<double>() );
+    nnt::set_zone_abundances_to_equilibrium( zone );
+  }
+  else if( vm.count( nnt::s_T9_0 ) == 1 && vm.count( S_S_0 ) == 1 )
+  {
+    param_map[nnt::s_T9_0] = vm[nnt::s_T9_0].as<double>();
+    zone.updateProperty( nnt::s_T9, vm[nnt::s_T9_0].as<double>() );
+    zone.updateProperty( nnt::s_ENTROPY_PER_NUCLEON, vm[S_S_0].as<double>() );
+    nnt::compute_1d_root(
+      boost::bind(
+        user::compute_log10_density_entropy_root_with_equilibrium,
+        _1,
+        boost::ref( zone )
+      ),
+      1.,
+      2.
+    );
+    param_map[nnt::s_RHO_0] = zone.getProperty<double>( nnt::s_RHO );
+  }
+  else if( vm.count( nnt::s_RHO_0 ) == 1 && vm.count( S_S_0 ) == 1 )
+  {
+    param_map[nnt::s_RHO_0] = vm[nnt::s_RHO_0].as<double>();
+    zone.updateProperty( nnt::s_RHO, vm[nnt::s_RHO_0].as<double>() );
+    zone.updateProperty( nnt::s_ENTROPY_PER_NUCLEON, vm[S_S_0].as<double>() );
+    nnt::compute_1d_root(
+      boost::bind(
+        user::compute_log10_t9_entropy_root_with_equilibrium,
+        _1,
+        boost::ref( zone )
+      ),
+      1.,
+      2.
+    );
+    param_map[nnt::s_T9_0] = zone.getProperty<double>( nnt::s_T9 );
+  }
+
+}
+
+//##############################################################################
 // get_input().
 //##############################################################################
 
@@ -330,9 +470,9 @@ get_input( int argc, char **argv )
     po::options_description help( "\nHelp Options" );
     help.add_options()
 
-      ( "help", "print out usage statement and exit\n" )
+      ( "help", "print out usage statement and exit" )
 
-      ( "example", "print out example usage and exit\n" )
+      ( "example", "print out example usage and exit" )
 
       ( "program_options", po::value<std::string>(),
         "print out list of program options (help, general, network,"
@@ -358,6 +498,17 @@ get_input( int argc, char **argv )
        po::value<double>()->default_value( 10., "10." ),
        "End time (s)"
       )
+      ( nnt::s_T9_0, po::value<double>(),
+        "Initial T (in 10^9 K)"
+      )
+      ( nnt::s_RHO_0, po::value<double>(),
+        "Initial density (g/cc)"
+      )
+      (
+        S_S_0,
+        po::value<double>(),
+        "Initial entropy per nucleon ( k_B )"
+      )
       (
        nnt::s_STEPS,
        po::value<size_t>()->default_value( 20 ),
@@ -375,12 +526,11 @@ get_input( int argc, char **argv )
       )
       (
        S_OBSERVE,
-       po::value<std::string>()->default_value( "no" ),
-       "Observe steps"
+       "Observe steps (default: off)"
       )
 
       ( S_RESPONSE_FILE, po::value<std::string>(),
-        "can be specified with '@name', too\n"
+        "can be specified with '@name', too"
       )
 
     ;
@@ -388,14 +538,24 @@ get_input( int argc, char **argv )
     po::options_description network("\nNetwork options");
     network.add_options()
       (
+       nnt::s_YE,
+       po::value<double>(),
+       "Input electron-to-nucleon ratio"
+      )
+      (
+       S_ZONE_FILE,
+       po::value<std::string>(),
+       "Zone input xml file"
+      )
+      (
        S_NUC_XPATH,
        po::value<std::vector<std::string> >()->multitoken()->composing(),
-       "XPath to select nuclei (default: all nuclides)\n"
+       "XPath to select nuclei (default: all nuclides)"
       )
       (
        S_REAC_XPATH,
        po::value<std::vector<std::string> >()->multitoken()->composing(),
-       "XPath to select reactions (default: all reactions)\n"
+       "XPath to select reactions (default: all reactions)"
       )
       (
        S_SDOT_NUC_XPATH,
@@ -438,20 +598,10 @@ get_input( int argc, char **argv )
     if( vm.count( "example" ) )
     {
       std::cerr <<
-        "\n" << argv[0] <<
-        " ../../data_pub/my_net.xml ../../data/my_zone.xml output.xml " <<
-        " --nuc_xpath \"[z <= 30]\"\n " << std::endl;
-      exit( EXIT_SUCCESS );
-    }
-
-    if( argc == 1 || vm.count("help") == 1 )
-    {
-      std::cerr <<
-        "\nUsage: " << argv[0] << " net_xml zone_xml output_xml [options]" <<
+        "\n" << argv[0] << " ../../data_pub/my_net.xml output.xml " <<
+        " --t9_0 10 --rho_0 1.e8 --Ye 0.5 --nuc_xpath \"[z <= 30]\"\n " <<
         std::endl;
-      std::cerr << s_purpose << std::endl;
-      std::cout << help << "\n";
-      exit( EXIT_FAILURE );
+      exit( EXIT_SUCCESS );
     }
 
     if( vm.count( S_PROGRAM_OPTIONS ) )
@@ -466,8 +616,72 @@ get_input( int argc, char **argv )
       );
     }
 
+    //==========================================================================
+    // Response file.
+    //==========================================================================
+
     if( vm.count( S_RESPONSE_FILE ) )
-      vm = response_file( vm, general );
+      vm = response_file( vm, all );
+
+    //==========================================================================
+    // Check input.
+    //==========================================================================
+
+    if( argc < 3 || vm.count("help") == 1 )
+    {
+      std::cerr <<
+        "\nUsage: " << argv[0] << " net_xml output_xml [options]" <<
+        std::endl;
+      std::cerr << s_purpose << std::endl;
+      std::cout << help << "\n";
+      exit( EXIT_FAILURE );
+    }
+
+    if(
+      boost::algorithm::ifind_first( argv[1], "--" ) || 
+      boost::algorithm::ifind_first( argv[1], "@" ) || 
+      boost::algorithm::ifind_first( argv[2], "--" ) ||
+      boost::algorithm::ifind_first( argv[2], "@" )
+    )
+    {
+      std::cerr << "Required arguments must not be options or response " <<
+                   " files." << std::endl;
+      exit( EXIT_FAILURE );
+    }
+
+    std::vector<std::string> v_s1 =
+      boost::assign::list_of(nnt::s_YE)(S_ZONE_FILE);
+
+    size_t i_count1 = 0;
+
+    BOOST_FOREACH( std::string s, v_s1 )
+    {
+      if( vm.count( s ) != 0 ) { i_count1++; }
+    }
+
+    if( i_count1 != 1 )
+    {
+      std::cerr << "Must specify one (and only one) of " << nnt::s_YE <<
+                   " or " << S_ZONE_FILE << ".\n";
+      exit( EXIT_FAILURE );
+    }
+
+    std::vector<std::string> v_s2 =
+      boost::assign::list_of(nnt::s_T9_0)(nnt::s_RHO_0)(S_S_0);
+
+    size_t i_count2 = 0;
+
+    BOOST_FOREACH( std::string s, v_s2 )
+    {
+      if( vm.count( s ) != 0 ) { i_count2++; }
+    }
+
+    if( i_count2 != 2 )
+    {
+      std::cerr << "Must specify two (and only two) of " << nnt::s_T9_0 <<
+                   ", " << nnt::s_RHO_0 << ", and "<< S_S_0 << ".\n";
+      exit( EXIT_FAILURE );
+    }
 
     //==========================================================================
     // XPath strings.
@@ -530,6 +744,31 @@ get_input( int argc, char **argv )
     }
 
     //==========================================================================
+    // Get non-network data.
+    //==========================================================================
+
+    param_map[nnt::s_TIME] = vm[nnt::s_TIME].as<double>();
+    param_map[nnt::s_DTIME] = vm[nnt::s_DTIME].as<double>();
+    param_map[nnt::s_TEND] = vm[nnt::s_TEND].as<double>();
+    param_map[nnt::s_STEPS] = vm[nnt::s_STEPS].as<size_t>();
+    param_map[nnt::s_USE_SCREENING] =
+      vm[nnt::s_USE_SCREENING].as<std::string>();
+    param_map[nnt::s_USE_NSE_CORRECTION] =
+      vm[nnt::s_USE_NSE_CORRECTION].as<std::string>();
+    param_map[S_T9_GUESS] = vm[S_T9_GUESS].as<std::string>();
+    if( vm.count( S_OBSERVE ) )
+    {
+      param_map[S_OBSERVE] = vm[S_OBSERVE].as<std::string>();
+    }
+    param_map[nnt::s_MU_NUE_KT] = vm[nnt::s_MU_NUE_KT].as<std::string>();
+
+    //==========================================================================
+    // Set user-defined options
+    //==========================================================================
+
+    my_user::set_user_defined_options( vm, param_map );
+
+    //==========================================================================
     // Get network and view.
     //==========================================================================
 
@@ -542,41 +781,16 @@ get_input( int argc, char **argv )
       s_reac_xpath.c_str()
     );
 
-    Libnucnet__assignZoneDataFromXml(
-      boost::any_cast<Libnucnet *>( param_map[S_NUCNET] ),
-      argv[2],
-      ""
-    );
+    set_thermo_conditions_and_abundances( vm, param_map );
 
-    if( vm.count(S_SDOT_NUC_XPATH) == 1 || vm.count(S_SDOT_REAC_XPATH) == 1 )
-    {
-      param_map[S_VIEW] = 
-        Libnucnet__NetView__new(
-          Libnucnet__getNet(
-            boost::any_cast<Libnucnet *>( param_map[S_NUCNET] )
-          ),
-          s_sdot_nuc_xpath.c_str(),
-          s_sdot_reac_xpath.c_str()
-        );
-    }
-
-    //==========================================================================
-    // Get other data.
-    //==========================================================================
-
-    param_map[nnt::s_TIME] = vm[nnt::s_TIME].as<double>();
-    param_map[nnt::s_DTIME] = vm[nnt::s_DTIME].as<double>();
-    param_map[nnt::s_TEND] = vm[nnt::s_TEND].as<double>();
-    param_map[nnt::s_STEPS] = vm[nnt::s_STEPS].as<size_t>();
-    param_map[nnt::s_USE_SCREENING] = vm[nnt::s_USE_SCREENING].as<std::string>();
-    param_map[nnt::s_USE_NSE_CORRECTION] =
-      vm[nnt::s_USE_NSE_CORRECTION].as<std::string>();
-    param_map[S_T9_GUESS] = vm[S_T9_GUESS].as<std::string>();
-    param_map[S_OBSERVE] = vm[S_OBSERVE].as<std::string>();
-    param_map[nnt::s_MU_NUE_KT] = vm[nnt::s_MU_NUE_KT].as<std::string>();
-
-    // Set user-defined options
-    my_user::set_user_defined_options( vm, param_map );
+    param_map[S_VIEW] = 
+      Libnucnet__NetView__new(
+        Libnucnet__getNet(
+          boost::any_cast<Libnucnet *>( param_map[S_NUCNET] )
+        ),
+        s_sdot_nuc_xpath.c_str(),
+        s_sdot_reac_xpath.c_str()
+      );
 
     return param_map;
 
@@ -608,10 +822,9 @@ int main( int argc, char * argv[] ) {
   Libnucnet__NetView * p_view = NULL;
   nnt::Zone zone;
   char s_property[32];
-  std::set<std::string> isolated_species_set;
 
   my_state_type
-    x(3), xold(3), x_lim = boost::assign::list_of(1.e-10)(1.)(1.e-5);
+    x(3), xold(3), x_lim = boost::assign::list_of(1.e-10)(1.e-10)(1.e-5);
 
   //============================================================================
   // Check input.
@@ -684,45 +897,6 @@ int main( int argc, char * argv[] ) {
     boost::any_cast<std::string>( param_map[nnt::s_MU_NUE_KT] )
   );
 
-  //============================================================================
-  // Remove isolated species if desired.
-  //============================================================================
-
-  if(
-    Libnucnet__Reac__getNumberOfReactions(
-      Libnucnet__Net__getReac( Libnucnet__getNet( p_my_nucnet ) )
-    ) != 0
-  )
-  {
-
-    isolated_species_set =
-      user::get_isolated_species(
-        Libnucnet__getNet( p_my_nucnet ),
-        "",
-        ""
-      );
-
-    BOOST_FOREACH( std::string s_species, isolated_species_set )
-    {
-
-//    Careful that you don't remove a species with non-zero abundance!
-
-      std::cout << s_species << std::endl;
-
-      Libnucnet__Nuc__removeSpecies(
-        Libnucnet__Net__getNuc( Libnucnet__getNet( p_my_nucnet ) ),
-        Libnucnet__Nuc__getSpeciesByName(
-          Libnucnet__Net__getNuc(
-            Libnucnet__getNet( p_my_nucnet )
-          ),
-          s_species.c_str()
-        )
-      );
-
-    }
-
-  }
-  
   //============================================================================
   // Set the acceleration function.
   // Must return the scaled acceleration for the given available data.
@@ -825,7 +999,7 @@ int main( int argc, char * argv[] ) {
   //   void( const my_state_type& x, const my_state_type& dxdt, const double t )
   //============================================================================
 
-  if( boost::any_cast<std::string>( param_map[S_OBSERVE] ) == "yes" )
+  if( param_map.find( S_OBSERVE ) != param_map.end() )
   {
     zone.updateFunction(
       S_OBSERVER_FUNCTION,
@@ -923,7 +1097,7 @@ int main( int argc, char * argv[] ) {
   // Choose the stepper.
   //============================================================================
 
-  boost::numeric::odeint::adams_bashforth<4, my_state_type > stepper;
+  boost::numeric::odeint::adams_bashforth<4, my_state_type> stepper;
 
   //============================================================================
   // Evolve network while t < final t. 
@@ -993,7 +1167,6 @@ int main( int argc, char * argv[] ) {
       );
     }
 
-std::cout << "Now update: " << std::endl;
     zone.updateProperty(
       nnt::s_T9,
       my_user::t9_function(
@@ -1023,7 +1196,7 @@ std::cout << "Now update: " << std::endl;
   // Output step data.
   //============================================================================
 
-    if( boost::any_cast<std::string>( param_map[S_OBSERVE] ) == "yes" )
+    if( param_map.find( S_OBSERVE ) != param_map.end() )
     {
       std::cout <<
         boost::format( "t = %g, x = {%g, %g, %g}\n\n" ) %
@@ -1051,7 +1224,7 @@ std::cout << "Now update: " << std::endl;
       nnt::write_xml( p_my_output, zone.getNucnetZone() );
       if( B_OUTPUT_EVERY_TIME_DUMP )
       {
-        Libnucnet__writeToXmlFile( p_my_output, argv[3] );
+        Libnucnet__writeToXmlFile( p_my_output, argv[2] );
       }
     }
 
@@ -1094,7 +1267,7 @@ std::cout << "Now update: " << std::endl;
   // Write output.
   //============================================================================
 
-  Libnucnet__writeToXmlFile( p_my_output, argv[3] );
+  Libnucnet__writeToXmlFile( p_my_output, argv[2] );
 
   //============================================================================
   // Clean up and exit.

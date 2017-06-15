@@ -41,6 +41,8 @@
 #include "user/hydro_helper.h"
 
 #define S_ROOT_FACTOR   "root_factor"
+#define S_ALPHA         "alpha"
+#define S_Y0            "y_0"
 
 namespace po = boost::program_options;
 
