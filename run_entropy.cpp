@@ -111,6 +111,8 @@ std::pair<std::string,std::string> at_option_parser( std::string const& s )
 {
   if ( '@' == s[0] )
     return std::make_pair( std::string( S_RESPONSE_FILE ), s.substr( 1 ) );
+  else if ( '#' == s[0] )
+    return std::make_pair( "", "" );
   else
     return std::pair<std::string,std::string>();
 }
@@ -524,8 +526,7 @@ get_input( int argc, char **argv )
       )
       (
        S_OBSERVE,
-       po::value<std::string>()->default_value( "no" ),
-       "Observe steps"
+       "Observe steps (default: off)"
       )
 
       ( S_RESPONSE_FILE, po::value<std::string>(),
@@ -755,7 +756,10 @@ get_input( int argc, char **argv )
     param_map[nnt::s_USE_NSE_CORRECTION] =
       vm[nnt::s_USE_NSE_CORRECTION].as<std::string>();
     param_map[S_T9_GUESS] = vm[S_T9_GUESS].as<std::string>();
-    param_map[S_OBSERVE] = vm[S_OBSERVE].as<std::string>();
+    if( vm.count( S_OBSERVE ) )
+    {
+      param_map[S_OBSERVE] = vm[S_OBSERVE].as<std::string>();
+    }
     param_map[nnt::s_MU_NUE_KT] = vm[nnt::s_MU_NUE_KT].as<std::string>();
 
     //==========================================================================
@@ -820,7 +824,7 @@ int main( int argc, char * argv[] ) {
   char s_property[32];
 
   my_state_type
-    x(3), xold(3), x_lim = boost::assign::list_of(1.e-10)(1.)(1.e-5);
+    x(3), xold(3), x_lim = boost::assign::list_of(1.e-10)(1.e-10)(1.e-5);
 
   //============================================================================
   // Check input.
@@ -995,7 +999,7 @@ int main( int argc, char * argv[] ) {
   //   void( const my_state_type& x, const my_state_type& dxdt, const double t )
   //============================================================================
 
-  if( boost::any_cast<std::string>( param_map[S_OBSERVE] ) == "yes" )
+  if( param_map.find( S_OBSERVE ) != param_map.end() )
   {
     zone.updateFunction(
       S_OBSERVER_FUNCTION,
@@ -1192,7 +1196,7 @@ int main( int argc, char * argv[] ) {
   // Output step data.
   //============================================================================
 
-    if( boost::any_cast<std::string>( param_map[S_OBSERVE] ) == "yes" )
+    if( param_map.find( S_OBSERVE ) != param_map.end() )
     {
       std::cout <<
         boost::format( "t = %g, x = {%g, %g, %g}\n\n" ) %

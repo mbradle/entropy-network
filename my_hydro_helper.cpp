@@ -58,8 +58,12 @@ get_user_defined_descriptions( po::options_description& user )
         "Expansion timescale (s)"
       )
 
-      ( S_TA, po::value<double>()->default_value( 1, "1" ),
-        "Asymptotic timescale (in units of tau)"
+      ( S_Y0, po::value<double>()->default_value( 1, "1" ),
+        "Scaled initial velocity"
+      )
+
+      ( S_ALPHA, po::value<double>()->default_value( 3, "3" ),
+        "Asymptotic velocity log"
       )
 
       ( S_ROOT_FACTOR, po::value<double>()->default_value( 1.001, "1.001" ),
@@ -91,14 +95,18 @@ void
 set_user_defined_options( po::variables_map& vmap, param_map_t& param_map )
 {
 
-  if( vmap[S_TA].as<double>() < 0 || vmap[nnt::s_TAU].as<double>() < 0 )
+  if(
+    vmap[S_Y0].as<double>() < 0 ||
+    vmap[nnt::s_TAU].as<double>() < 0
+  )
   {
-    std::cerr << "Timescale must be larger than 0." << std::endl;
+    std::cerr << "Invalid input." << std::endl;
     exit( EXIT_FAILURE );
   }
 
   param_map[nnt::s_TAU] = vmap[nnt::s_TAU].as<double>();
-  param_map[S_TA] = vmap[S_TA].as<double>() * vmap[nnt::s_TAU].as<double>();
+  param_map[S_Y0] = vmap[S_Y0].as<double>();
+  param_map[S_ALPHA] = vmap[S_ALPHA].as<double>();
   param_map[S_ROOT_FACTOR] = vmap[S_ROOT_FACTOR].as<double>();
  
 }
@@ -115,13 +123,7 @@ initialize_state(
 {
 
   x[0] = 1.;
-  x[1] =
-    1. /
-    (
-      boost::any_cast<double>( param_map[S_TA] ) 
-      + 
-      boost::any_cast<double>( param_map[nnt::s_TAU] )
-    );
+  x[1] = boost::any_cast<double>( param_map[S_Y0] );
 
 }
 
@@ -139,9 +141,9 @@ acceleration(
 {
 
   double tau = boost::any_cast<double>( param_map[nnt::s_TAU] );
-  double t_a =  boost::any_cast<double>( param_map[S_TA] );
+  double alpha = boost::any_cast<double>( param_map[S_ALPHA] );
 
-  return x[1] / ( tau  + t_a * exp( time / tau ) );
+  return (x[1] / tau) * exp( -time / (alpha * tau ) );
 
 }
 
@@ -153,7 +155,12 @@ double rho_function( param_map_t& param_map, const state_type& x )
 {
 
   return
-    boost::any_cast<double>( param_map[nnt::s_RHO_0] ) / gsl_pow_3( x[0] );
+    boost::any_cast<double>( param_map[nnt::s_RHO_0] ) *
+      boost::any_cast<double>( param_map[S_Y0] ) *
+      1. /
+      (
+        gsl_pow_2( x[0] ) * x[1]
+      );
 
 }
 

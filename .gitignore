@@ -3,3 +3,5 @@ run_entropy
 *.txt
 *.dSYM
 *.rsp
+*.py
+*.pyc
